@@ -1,0 +1,132 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /
+
+spring:
+  application:
+    name: risk-ai-qa
+  profiles:
+    active: dev
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+
+  # ---- MySQL ----
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DB:risk_ai_qa}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:123456}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+      continue-on-error: true
+
+  # ---- Redis ----
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: 0
+      timeout: 5s
+      lettuce:
+        pool:
+          max-active: 16
+          max-idle: 8
+          min-idle: 2
+
+  # ---- Spring AI（聊天 + 向量化均走阿里云百炼 DashScope）----
+  ai:
+    openai:
+      api-key: ${DASHSCOPE_API_KEY:}
+      base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      chat:
+        # base-url 已含 /v1，须用 /chat/completions，否则会拼成 /v1/v1/chat/completions
+        completions-path: /chat/completions
+        options:
+          model: ${OPENAI_CHAT_MODEL:qwen-plus}
+          temperature: ${OPENAI_CHAT_TEMPERATURE:0.1}
+      embedding:
+        embeddings-path: /embeddings
+        options:
+          model: ${OPENAI_EMBEDDING_MODEL:text-embedding-v4}
+    vectorstore:
+      milvus:
+        client:
+          host: ${MILVUS_HOST:localhost}
+          port: ${MILVUS_PORT:19530}
+        database-name: ${MILVUS_DB:default}
+        collection-name: ${MILVUS_COLLECTION:risk_knowledge}
+        # text-embedding-3-small => 1536 dims. Keep in sync with the embedding model.
+        embedding-dimension: ${MILVUS_DIM:1024}
+        index-type: IVF_FLAT
+        metric-type: COSINE
+        initialize-schema: true
+
+# ---- MyBatis-Plus ----
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+  global-config:
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+  type-aliases-package: com.gm.riskaiqa.entity
+  mapper-locations: classpath*:/mapper/**/*.xml
+
+# ---- Application specific settings (all tunables externalized here) ----
+risk-ai:
+  # Text chunking rules
+  chunk:
+    # Tokens per chunk
+    size: 800
+    # Overlapping tokens between adjacent chunks
+    overlap: 150
+    # jtokkit encoding used for token counting: CL100K_BASE / O200K_BASE
+    encoding: CL100K_BASE
+  # RAG retrieval
+  rag:
+    top-k: 5
+    similarity-threshold: 0.5
+  # Redis answer cache
+  cache:
+    enabled: true
+    ttl-minutes: 60
+    key-prefix: "risk-ai:qa:cache:"
+  # Redis fixed-window rate limiting for /risk/qa
+  rate-limit:
+    enabled: true
+    # Max requests allowed per window, per client IP
+    max-requests: 20
+    # Window length in seconds
+    window-seconds: 60
+    key-prefix: "risk-ai:qa:rl:"
+  # Service degradation
+  degrade:
+    # Fallback answer returned when the LLM is unavailable / times out
+    fallback-answer: "当前问答服务繁忙或暂时不可用，请稍后重试。"
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+logging:
+  level:
+    com.gm.riskaiqa: INFO
+    org.springframework.ai: INFO
