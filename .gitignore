@@ -1,0 +1,23 @@
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# 误建的空嵌套仓库，勿提交
+risk-ai-rag/
+
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+
+*.log
+logs/
+
+.DS_Store
+.env
+.env.*
+!.env.example
+application-local.yml
+**/application-local.yml
