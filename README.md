@@ -8,12 +8,14 @@
   <img src="https://img.shields.io/badge/Spring%20Boot-3.4.5-6DB33F?style=flat-square&logo=springboot&logoColor=white" />
   <img src="https://img.shields.io/badge/Spring%20AI-1.0.0-6DB33F?style=flat-square&logo=spring&logoColor=white" />
   <img src="https://img.shields.io/badge/Vue-3-42b883?style=flat-square&logo=vuedotjs&logoColor=white" />
-  <img src="https://img.shields.io/badge/Milvus-2.3-00A1E0?style=flat-square" />
+  <img src="https://img.shields.io/badge/Milvus-2.3.9-00A1E0?style=flat-square" />
+  <img src="https://img.shields.io/badge/MySQL-8.0-4479A1?style=flat-square&logo=mysql&logoColor=white" />
+  <img src="https://img.shields.io/badge/Redis-7.2-DC382D?style=flat-square&logo=redis&logoColor=white" />
 </p>
 
 ## 什么是 Risk AI Q&A？
 
-**Risk AI Q&A** 是一套面向金融风控场景的企业级 RAG 智能问答系统，覆盖从文档入库到门户问答的完整链路。后端基于 **Spring Boot + Spring AI**，前端配套 **Vue 3 管理门户**（仓库 [`risk-ai-web`](../risk-ai-web)）。
+**Risk AI Q&A** 是一套面向金融风控场景的企业级 RAG 智能问答系统，覆盖从文档入库到门户问答的完整链路。后端 **Spring Boot 3.4.5 + Spring AI 1.0.0**，前端配套 **Vue 3 管理门户**（仓库 [`risk-ai-web`](../risk-ai-web)）。
 
 - **知识库入库**：Apache Tika 解析 TXT/PDF → jtokkit **800 Token 切片 / 150 Token 重叠** → 百炼 Embedding → Milvus 向量存储。
 - **RAG 智能问答**：向量相似度检索 → **风控 Prompt 强约束**（仅依据参考文档作答，禁止幻觉）→ 千问大模型生成答案。
@@ -127,34 +129,70 @@ flowchart LR
 
 ## 技术栈
 
+> **版本以项目文件为准**（`pom.xml` / `package.json` / `docker-compose.yml` / `application.yml`），下表已与源码核对。
+
+### 版本清单
+
+| 类别 | 组件 | 锁定版本 | 定义位置 |
+| --- | --- | --- | --- |
+| 后端运行时 | JDK | **17** | `pom.xml` → `java.version` |
+| 后端框架 | Spring Boot | **3.4.5** | `pom.xml` → `spring-boot-starter-parent` |
+| AI 框架 | Spring AI BOM | **1.0.0** | `pom.xml` → `spring-ai.version` |
+| AI 依赖 | spring-ai-starter-model-openai | **1.0.0** | Maven 解析 |
+| AI 依赖 | spring-ai-starter-vector-store-milvus | **1.0.0** | Maven 解析 |
+| ORM | MyBatis-Plus | **3.5.16** | `pom.xml` |
+| API 文档 | springdoc-openapi | **2.8.5** | `pom.xml` |
+| 文档解析 | Apache Tika | **3.2.3** | `pom.xml` |
+| 分词计数 | jtokkit | **1.1.0** | `pom.xml` |
+| 大模型 Chat | 千问 `qwen-plus` | 默认 | `application.yml` |
+| 大模型 Embedding | `text-embedding-v4` | 默认 | `application.yml` |
+| 向量维度 | Milvus embedding dim | **1024** | `application.yml` |
+| 中间件 | MySQL | **8.0** | `docker-compose.yml` |
+| 中间件 | Redis | **7.2** | `docker-compose.yml` |
+| 中间件 | Milvus | **2.3.9** | `docker-compose.yml` |
+| 前端 | Vue | **3.5.x** | `risk-ai-web/package.json` |
+| 前端 | Vite | **5.4.x** | `risk-ai-web/package.json` |
+| 前端 | Element Plus | **2.8.x** | `risk-ai-web/package.json` |
+| 前端 | Pinia | **2.2.x** | `risk-ai-web/package.json` |
+| 前端 | ECharts | **5.5.x** | `risk-ai-web/package.json` |
+
 ### 后端（risk-ai-qa）
 
 | 组件 | 选型 | 说明 |
 | --- | --- | --- |
 | JDK | **Java 17** | |
-| 框架 | **Spring Boot 3.4.5** | |
-| AI | **Spring AI 1.0.0** | OpenAI 兼容协议，对接百炼 DashScope |
+| 框架 | **Spring Boot 3.4.5** | `spring-boot-starter-parent` |
+| AI | **Spring AI 1.0.0** | BOM 管理；OpenAI 兼容协议对接百炼 DashScope |
 | 大模型 | **千问 qwen-plus** | Chat；Embedding 用 `text-embedding-v4` |
-| 向量库 | **Milvus 2.3.x** | Collection：`risk_knowledge` |
-| 缓存/限流 | **Redis 7.x** | 答案缓存、Token、IP 限流 |
-| 关系库 | **MySQL 8.x** | 业务数据 + 问答日志 |
+| 向量库 | **Milvus 2.3.9** | Collection：`risk_knowledge` |
+| 缓存/限流 | **Redis 7.2** | 答案缓存、Token、IP 限流 |
+| 关系库 | **MySQL 8.0** | 业务数据 + 问答日志 |
 | ORM | **MyBatis-Plus 3.5.16** | 分页、逻辑删除 |
 | 文档解析 | **Apache Tika 3.2.3** | |
 | 分词计数 | **jtokkit 1.1.0** | Token 级切片 |
-| API 文档 | springdoc-openapi | Swagger UI |
+| API 文档 | **springdoc-openapi 2.8.5** | Swagger UI |
 
 ### 前端（risk-ai-web）
 
 | 组件 | 选型 |
 | --- | --- |
-| 框架 | Vue 3 + Vite |
-| UI | Element Plus |
-| 状态 | Pinia |
-| 图表 | ECharts（管理仪表盘） |
+| 框架 | Vue **3.5.12** + Vite **5.4.10** |
+| UI | Element Plus **2.8.4** |
+| 状态 | Pinia **2.2.4** |
+| 路由 | Vue Router **4.4.5** |
+| HTTP | Axios **1.7.7** |
+| 图表 | ECharts **5.5.1**（管理仪表盘） |
 
 ### 版本说明
 
-需求曾写 Spring Boot 3.2 + Spring AI，但 **Spring AI 1.0.x GA 要求 Boot 3.4+**。当前采用可稳定构建的组合：**Spring Boot 3.4.5 + Spring AI 1.0.0**。
+| 文档 | Spring Boot | Spring AI |
+| --- | --- | --- |
+| 需求文档 [`risk-ai-qa.md`](risk-ai-qa.md) | 3.2.x（拟定） | 1.0.x |
+| **本项目实际构建** | **3.4.5** | **1.0.0** |
+
+Spring AI **1.0.0 GA** 要求 Spring Boot **3.4+**；在 Boot 3.2 上可用的 Spring AI 0.8.x 在当前 Maven 镜像环境难以拉取。因此 `pom.xml` 采用 **Boot 3.4.5 + Spring AI 1.0.0**（`mvn dependency:tree` 已验证）。
+
+**请勿与参考模板 `md.md`（Ragent 项目，标注 Spring AI 2.0）混淆**——本仓库未使用 Spring AI 2.0。
 
 ## 目录结构
 
@@ -206,11 +244,11 @@ cd risk-ai-qa
 docker compose up -d
 ```
 
-| 服务 | 端口 |
-| --- | --- |
-| MySQL | **3307** → 3306（避免与本机 3306 冲突） |
-| Redis | 6379 |
-| Milvus | 19530 |
+| 服务 | 镜像版本 | 端口 |
+| --- | --- | --- |
+| MySQL | **8.0** | **3307** → 3306（避免与本机 3306 冲突） |
+| Redis | **7.2** | 6379 |
+| Milvus | **2.3.9** | 19530 |
 
 ### 2. 配置密钥（勿提交 Git）
 
