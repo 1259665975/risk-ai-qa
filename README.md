@@ -1,7 +1,8 @@
 <p align="center">
   <strong>企业级 RAG 风控知识库</strong><br/>
-  <sub>Risk AI Q&A — 文档入库 · 向量检索 · 智能问答 · 管理门户</sub>
+  <sub>Risk AI RAGENT — 文档入库 · 向量检索 · 智能问答 · 管理门户</sub>
 </p>
+
 
 <p align="center">
   <img src="https://img.shields.io/badge/JDK-17-437291?style=flat-square&logo=openjdk&logoColor=white" />
@@ -13,9 +14,9 @@
   <img src="https://img.shields.io/badge/Redis-7.2-DC382D?style=flat-square&logo=redis&logoColor=white" />
 </p>
 
-## 什么是 Risk AI Q&A？
+## 什么是 Risk AI RAGENT？
 
-**Risk AI Q&A** 是一套面向金融风控场景的企业级 RAG 智能问答系统，覆盖从文档入库到门户问答的完整链路。后端 **Spring Boot 3.4.5 + Spring AI 1.0.0**，前端配套 **Vue 3 管理门户**（仓库 [`risk-ai-web`](../risk-ai-web)）。
+**Risk AI RAGENT** 是一套面向金融风控场景的企业级 RAG 智能问答系统，覆盖从文档入库到门户问答的完整链路。后端 **Spring Boot 3.4.5 + Spring AI 1.0.0**，前端配套 **Vue 3 管理门户**（仓库 [`risk-ai-web`](../risk-ai-web)）。
 
 - **知识库入库**：Apache Tika 解析 TXT/PDF → jtokkit **800 Token 切片 / 150 Token 重叠** → 百炼 Embedding → Milvus 向量存储。
 - **RAG 智能问答**：向量相似度检索 → **风控 Prompt 强约束**（仅依据参考文档作答，禁止幻觉）→ 千问大模型生成答案。
@@ -156,7 +157,7 @@ flowchart LR
 | 前端 | Pinia | **2.2.x** | `risk-ai-web/package.json` |
 | 前端 | ECharts | **5.5.x** | `risk-ai-web/package.json` |
 
-### 后端（risk-ai-qa）
+### 后端（risk-ai-ragent）
 
 | 组件 | 选型 | 说明 |
 | --- | --- | --- |
@@ -240,7 +241,7 @@ risk-ai-web/                 前端门户（同级目录）
 ### 1. 启动中间件
 
 ```powershell
-cd risk-ai-qa
+cd risk-ai-ragent
 docker compose up -d
 ```
 
@@ -352,7 +353,7 @@ curl -X POST http://localhost:8080/risk/qa \
 
 ## 与典型 Demo 的对比
 
-| 对比维度 | 典型 RAG Demo | Risk AI Q&A |
+| 对比维度 | 典型 RAG Demo | Risk AI Ragent |
 | --- | --- | --- |
 | 文档入库 | 脚本手动塞数据 | Tika 解析 + Token 切片 + 管理端上传 |
 | 问答入口 | 单个 curl 接口 | 开放 API + 用户门户多轮会话 |
@@ -409,7 +410,7 @@ $env:MYSQL_PASSWORD="root"
 
 | 仓库 | 说明 |
 | --- | --- |
-| **risk-ai-qa**（本仓库） | Spring Boot 后端 + RAG 核心 |
+| **risk-ai-ragent**（本仓库） | Spring Boot 后端 + RAG 核心 |
 | **risk-ai-web** | Vue 3 前端门户 |
 
 ---
