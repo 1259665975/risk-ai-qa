@@ -1,6 +1,6 @@
 # Windows 本地启动与排错指南
 
-本文档汇总在 **Windows 10/11** 上启动 `risk-ai-qa`（后端）+ `risk-ai-web`（前端）时遇到的典型问题与解决办法。
+本文档汇总在 **Windows 10/11** 上启动 `risk-ai-ragent`（后端）+ `risk-ai-web`（前端）时遇到的典型问题与解决办法。
 
 ---
 
@@ -13,7 +13,7 @@
 docker ps
 
 # ② 启动中间件（MySQL / Redis / Milvus）
-cd f:\gm\risk-ai-qa
+cd f:\gm\risk-ai-ragent
 docker compose up -d
 
 # ③ 启动后端（JDK 17）
@@ -22,7 +22,7 @@ $env:PATH="$env:JAVA_HOME\bin;$env:PATH"
 $env:MYSQL_PORT="3307"
 $env:MYSQL_PASSWORD="root"
 $env:DASHSCOPE_API_KEY="你的百炼API密钥"
-cd f:\gm\risk-ai-qa
+cd f:\gm\risk-ai-ragent
 mvn spring-boot:run
 
 # ④ 启动前端（新开一个 PowerShell 窗口）
@@ -185,12 +185,12 @@ $env:MYSQL_PASSWORD="root"
 
 ---
 
-### 3.6 后端启动报 `Unknown database 'risk_ai_qa'`
+### 3.6 后端启动报 `Unknown database 'risk_ai_ragent'`
 
 **现象**
 
 ```
-java.sql.SQLSyntaxErrorException: Unknown database 'risk_ai_qa'
+java.sql.SQLSyntaxErrorException: Unknown database 'risk_ai_ragent'
 ```
 
 **原因**
@@ -207,7 +207,7 @@ java.sql.SQLSyntaxErrorException: Unknown database 'risk_ai_qa'
 若用本机 MySQL（非 Docker），需手动建库：
 
 ```sql
-CREATE DATABASE risk_ai_qa DEFAULT CHARACTER SET utf8mb4;
+CREATE DATABASE risk_ai_ragent DEFAULT CHARACTER SET utf8mb4;
 ```
 
 ---
@@ -278,8 +278,11 @@ chat:
 上传文档流程：
 
 ```
-文件 → Tika 解析 → 切片 → 百炼 Embedding → 写入 Milvus → MySQL 记元数据
+文件 → 格式校验 → Tika 解析（Office/PDF/文本）或 百炼 OCR（图片）
+     → 切片 → 百炼 Embedding → 写入 Milvus → MySQL 记元数据
 ```
+
+支持格式与 OCR 模型选型见 [文档入库指南.md](文档入库指南.md)。
 
 Milvus 不负责向量化，只负责存和搜。
 
@@ -316,6 +319,16 @@ $env:DASHSCOPE_API_KEY="sk-xxx"
 | `qwen-max` | 效果最好、较贵 |
 | `qwen-plus-latest` | 始终最新版 plus |
 
+**图片 OCR 模型**（`risk-ai.document.vision-model` / `RISK_AI_VISION_MODEL`）
+
+| model | 说明 |
+|-------|------|
+| `qwen-vl-plus` | 默认，通用视觉 + OCR |
+| `qwen-vl-ocr-latest` | 专用 OCR，扫描件/表格推荐 |
+| `vanchin/deepseek-ocr` | 百炼上的 DeepSeek OCR，可选 |
+
+图片上传失败时，确认 Key 已开通对应视觉/OCR 模型。详见 [文档入库指南.md](文档入库指南.md)。
+
 ---
 
 ### 3.11 Milvus 维度不一致
@@ -340,6 +353,143 @@ embedding-dimension: 1024
 
 ---
 
+### 3.12 管理端「创建时间 / 上传时间」列为空
+
+**现象**
+
+- 分类管理、文档管理表格中「创建时间」「上传时间」不显示
+- 仪表盘「用户总数 / 文档总数 / 分类总数」显示为 `-`，仅「问答总数」有数字
+
+**原因**
+
+前后端字段名不一致：
+
+| 页面 | 前端绑定 | 后端 JSON |
+|------|----------|-----------|
+| 分类 / 文档列表 | `createTime` | `createdAt` |
+| 仪表盘统计 | `userCount` / `documentCount` / `categoryCount` | `users` / `documents` / `categories` |
+
+**解决**
+
+已在 `risk-ai-web` 的 `src/api/admin.js` 与 `src/utils/dateTime.js` 中做字段映射（`createdAt` → `createTime`、统计字段别名）。拉取最新前端代码后刷新浏览器（必要时 Ctrl+F5）。
+
+---
+
+### 3.13 图片 OCR 报 `invalid header value: "Bearer 你的key"`
+
+**现象**
+
+管理端上传 PNG/JPG 时提示：
+
+```
+图片识别失败 [xxx.png]: invalid header value: "Bearer 你的key"
+```
+
+**原因**
+
+`application-local.yml` 或环境变量里仍是占位符 `你的key`，不是真实百炼 API Key。
+
+**解决**
+
+1. 打开 [百炼控制台](https://bailian.console.aliyun.com/) 复制 API Key（一般以 `sk-` 开头）
+2. 写入 `src/main/resources/application-local.yml`（该文件已在 `.gitignore`，勿提交）：
+
+   ```yaml
+   spring:
+     ai:
+       openai:
+         api-key: sk-你的真实密钥
+   ```
+
+   或启动前设置：`$env:DASHSCOPE_API_KEY="sk-xxx"`
+
+3. **必须重启后端**（改 yml 后热更新不生效）
+
+**注意**
+
+- 不要使用 `sk-ws-...` 等非百炼格式 Key，否则会 401
+- TXT/Word 入库可能正常，但**图片必须额外调用视觉 OCR**，Key 无效时只有图片会失败
+
+---
+
+### 3.14 用户端没有上传入口，如何检索图片内容？
+
+**现象**
+
+普通用户登录后只有「智能问答」，找不到上传图片按钮，怀疑不支持图片检索。
+
+**说明（设计如此）**
+
+| 角色 | 入口 | 能力 |
+|------|------|------|
+| **管理员** `/admin/documents` | 文档管理 | 上传 TXT/PDF/Word/**图片** 等并入库 |
+| **普通用户** `/user/chat` | 智能问答 | 仅**文字提问**，从已入库知识中检索 |
+
+图片检索流程：
+
+```
+管理员上传图片 → 百炼 OCR 成文字 → 切片向量化 → Milvus
+用户文字提问 → 向量检索命中 OCR 文本 → 大模型生成回答
+```
+
+- **不是「以图搜图」**，而是「图片先变文字，再按文字检索」
+- 用户端**不需要**也不提供上传功能；图片须由管理员先入知识库
+
+**正确使用**
+
+1. 用 `admin` 在管理端上传图片并选择分类，确认状态为「已入库」
+2. 用 `user1` 在用户端问答，**选择对应分类**（与上传时一致）
+3. 提问尽量包含图片里的关键词（如报告标题、专有名词）
+
+详见 [文档入库指南.md](文档入库指南.md) 第 7 节。
+
+---
+
+### 3.15 问答返回「当前问答服务繁忙或暂时不可用」
+
+**现象**
+
+用户端或管理端问答时，回答为固定文案「当前问答服务繁忙或暂时不可用，请稍后重试。」
+
+**原因**
+
+这是 **大模型调用失败后的降级回答**（`degraded=true`），常见原因：
+
+- API Key 无效、过期或未开通 `qwen-plus` 等对话模型
+- 百炼接口超时或限流
+- 网络问题
+
+**与「检索不到图片」的区别**
+
+| 情况 | 典型回答 | `degraded` |
+|------|----------|------------|
+| 检索无命中 | 「暂无相关风控规则信息」 | `false` |
+| 大模型失败 | 「当前问答服务繁忙…」 | `true` |
+
+**解决**
+
+1. 检查 `DASHSCOPE_API_KEY` / `application-local.yml`
+2. 查看后端日志中 `LLM invocation failed, degraded`
+3. 修复 Key 后重启后端，重新提问（勿依赖旧缓存答案）
+
+---
+
+### 3.16 修改 API Key 后未生效
+
+**现象**
+
+已改 `application-local.yml` 中的 Key，但 OCR 或问答仍报旧错误。
+
+**原因**
+
+Spring Boot 启动时加载配置，**运行中修改 yml 不会自动生效**。
+
+**解决**
+
+停止 `mvn spring-boot:run`（或结束占用 8080 的进程）后重新启动。若同时设置了环境变量 `DASHSCOPE_API_KEY`，其优先级高于 `application-local.yml`。
+
+---
+
 ## 4. 修改配置后如何重启
 
 ### 只改了 `application.yml`
@@ -350,7 +500,7 @@ $env:JAVA_HOME="F:\tool\jdk-17.0.9"
 $env:PATH="$env:JAVA_HOME\bin;$env:PATH"
 $env:MYSQL_PORT="3307"
 $env:MYSQL_PASSWORD="root"
-cd f:\gm\risk-ai-qa
+cd f:\gm\risk-ai-ragent
 mvn spring-boot:run
 ```
 
@@ -361,7 +511,7 @@ Vite 一般自动热更新；不行就 `Ctrl+C` 后 `npm run dev`。
 ### 改了 `docker-compose.yml`
 
 ```powershell
-cd f:\gm\risk-ai-qa
+cd f:\gm\risk-ai-ragent
 docker compose down
 docker compose up -d
 ```
@@ -405,7 +555,7 @@ Invoke-RestMethod -Uri "http://localhost:8080/api/auth/login" `
 
 ```
 ┌─────────────┐     /api/*      ┌──────────────────┐
-│ risk-ai-web │ ──────────────► │  risk-ai-qa      │
+│ risk-ai-web │ ──────────────► │  risk-ai-ragent      │
 │  :5173      │                 │  :8080           │
 └─────────────┘                 └────────┬─────────┘
                                          │
@@ -428,5 +578,6 @@ Invoke-RestMethod -Uri "http://localhost:8080/api/auth/login" `
 ## 7. 相关文档
 
 - [README.md](../README.md) — 项目说明与 API 示例
+- [文档入库指南.md](文档入库指南.md) — 多格式上传与图片 OCR
 - [快速理解代码.md](快速理解代码.md) — 代码阅读指南
 - [application.yml](../src/main/resources/application.yml) — 全部配置项

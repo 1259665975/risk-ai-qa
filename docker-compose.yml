@@ -5,7 +5,7 @@ services:
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: risk_ai_qa
+      MYSQL_DATABASE: risk_ai_ragent
       TZ: Asia/Shanghai
     ports:
       - "3307:3306"

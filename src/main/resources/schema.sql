@@ -1,6 +1,6 @@
--- Risk AI Q&A schema (MySQL 8.x)
+-- Risk AI RAgent schema (MySQL 8.x)
 
-CREATE TABLE IF NOT EXISTS qa_log (
+CREATE TABLE IF NOT EXISTS ragent_log (
     id              BIGINT       NOT NULL AUTO_INCREMENT COMMENT 'PK',
     trace_id        VARCHAR(64)  NOT NULL                COMMENT 'Request trace id',
     question        TEXT         NOT NULL                COMMENT 'User question',
@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS qa_log (
     PRIMARY KEY (id),
     KEY idx_trace (trace_id),
     KEY idx_created_at (created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Q&A interaction logs';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='RAgent interaction logs';
 
 CREATE TABLE IF NOT EXISTS sys_user (
     id          BIGINT       NOT NULL AUTO_INCREMENT,

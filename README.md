@@ -18,9 +18,10 @@
 
 **Risk AI RAGENT** 是一套面向金融风控场景的企业级 RAG 智能问答系统，覆盖从文档入库到门户问答的完整链路。后端 **Spring Boot 3.4.5 + Spring AI 1.0.0**，前端配套 **Vue 3 管理门户**（仓库 [`risk-ai-web`](../risk-ai-web)）。
 
-- **知识库入库**：Apache Tika 解析 TXT/PDF → jtokkit **800 Token 切片 / 150 Token 重叠** → 百炼 Embedding → Milvus 向量存储。
-- **RAG 智能问答**：向量相似度检索 → **风控 Prompt 强约束**（仅依据参考文档作答，禁止幻觉）→ 千问大模型生成答案。
+- **知识库入库**：Apache Tika 解析主流办公文档 + 百炼视觉 OCR 识别图片 → jtokkit **800 Token 切片 / 150 Token 重叠** → 百炼 Embedding → Milvus 向量存储。
+- **RAG 智能问答**：向量相似度检索（可选**多跳检索**）→ **风控 Prompt 强约束**（仅依据参考文档作答，禁止幻觉）→ 千问大模型生成答案。
 - **生产级能力**：Redis **答案缓存**、IP **限流**、大模型异常 **服务降级**、问答全链路 **MySQL 日志**。
+- **MCP 对外暴露**：Spring AI MCP Server，供 Cursor / Claude 等客户端调用风控 RAG 工具。
 - **企业门户**：管理员后台（用户/分类/文档/仪表盘/问答测试）+ 普通用户端（智能问答/会话历史/个人中心），Token 鉴权 + 角色隔离。
 
 > 不是调个 API 的 Demo，而是包含鉴权、会话、分类、文档管理、缓存限流等工程能力的可运行系统。
@@ -30,40 +31,60 @@
 | | 链接 | 说明 |
 | :---: | :--- | :--- |
 | 📖 | [快速理解代码](docs/快速理解代码.md) | 后端模块与调用链导读 |
+| 📄 | [文档入库指南](docs/文档入库指南.md) | 多格式上传、Tika、图片 OCR、模型选型 |
+| 🔌 | [MCP 接入指南](docs/MCP接入指南.md) | Cursor / Claude 调用风控 RAG 工具 |
+| 🔁 | [多跳检索指南](docs/多跳检索指南.md) | Multi-hop 检索原理与配置 |
 | 🛠️ | [Windows 本地启动与排错](docs/Windows本地启动与排错.md) | Docker / WSL / 端口 / Embedding 404 等 |
 | 🔧 | [application.yml](src/main/resources/application.yml) | 全部可调参数与环境变量 |
 | 📋 | [.env.example](.env.example) | 本地密钥与中间件配置模板 |
 
 ## 系统架构
 
-```mermaid
-flowchart LR
-  subgraph Web["risk-ai-web :5173"]
-    A[管理后台]
-    B[用户问答]
-  end
-  subgraph API["risk-ai-qa :8080"]
-    C["/api/auth · /api/admin/* · /api/user/*"]
-    D["/doc/* · /risk/qa"]
-    E[RagQaService]
-  end
-  subgraph Store["中间件"]
-    F[(MySQL)]
-    G[(Redis)]
-    H[(Milvus)]
-  end
-  I[百炼 DashScope<br/>Chat + Embedding]
+采用**四层分层**视图：展示层 → 应用层 → 数据层 → 模型服务。自上而下阅读即可。
 
-  A --> C
-  B --> C
-  C --> E
-  D --> E
-  E --> G
-  E --> H
-  E --> I
-  C --> F
-  E --> F
+```mermaid
+flowchart TB
+    WEB["risk-ai-web :5173<br/>Vue 3 管理门户 · 用户问答"]
+
+    subgraph APP["risk-ai-ragent :8080 — Spring Boot + Spring AI"]
+        P1["门户 API<br/>/api/auth · /api/admin · /api/user"]
+        P2["文档 API<br/>/doc/ingest · /doc/supported-types"]
+        P3["RAgent API<br/>/risk/ragent"]
+        P4["MCP Server<br/>/sse · /mcp/message"]
+        CORE["核心引擎<br/>RagRagentService · MultiHopRetrieval · DocumentService"]
+        P1 --> CORE
+        P2 --> CORE
+        P3 --> CORE
+        P4 --> CORE
+    end
+
+    subgraph DATA["数据与中间件"]
+        MYSQL[("MySQL<br/>元数据 · 日志")]
+        REDIS[("Redis<br/>Token · 缓存 · 限流")]
+        MILVUS[("Milvus<br/>向量检索")]
+    end
+
+    AI["百炼 DashScope<br/>Chat · Embedding · OCR"]
+    MCP["MCP 客户端<br/>Cursor · Claude Desktop"]
+
+    WEB --> P1
+    WEB --> P3
+    MCP -.-> P4
+    CORE --> MYSQL
+    CORE --> REDIS
+    CORE --> MILVUS
+    CORE --> AI
 ```
+
+| 层级 | 组件 | 职责 |
+| :--- | :--- | :--- |
+| 展示层 | `risk-ai-web` | 管理后台（用户/分类/文档/仪表盘）与用户端（问答/会话） |
+| 应用层 | 门户 API | Token 鉴权、角色隔离、会话与文档管理 |
+| | 文档 API | 多格式解析、OCR、切片向量化入库 |
+| | RAgent API | RAG 检索 + 风控 Prompt + 缓存/限流/降级 |
+| | MCP Server | 对外暴露检索、问答、统计等工具 |
+| 数据层 | MySQL / Redis / Milvus | 业务元数据、缓存与限流、向量相似度检索 |
+| 模型层 | 百炼 DashScope | 对话生成、Embedding、图片 OCR |
 
 ### 一次问答的核心链路
 
@@ -71,23 +92,30 @@ flowchart LR
 用户提问
   → 鉴权（Redis Token）
   → 答案缓存查询（Redis，MD5 Key）
-  → Milvus 向量检索（topK + 相似度阈值 + 可选分类过滤）
+  → 向量检索（单跳 / 多跳，见 risk-ai.multi-hop.enabled）
+      · 单跳：Milvus topK + 相似度阈值 + 可选分类过滤
+      · 多跳：第 1 跳原问题 → 生成子查询 → 第 2 跳再检索 → 合并去重
   → 组装风控 System Prompt + 检索上下文
   → 百炼千问生成回答
   → 引用按文档名去重
-  → 写入 chat_message / qa_log，返回答案与引用
+  → 写入 chat_message / ragent_log，返回答案与引用（含 multiHopUsed / retrievalHops）
 ```
 
 ### 文档入库链路
 
 ```
 上传文件（管理后台 / POST /doc/ingest）
-  → Tika 解析纯文本
+  → 扩展名校验（SupportedDocumentTypes）
+  → 分支解析
+      · 办公文档 / PDF / 文本 → Tika AutoDetectParser
+      · 图片 → 百炼视觉 OCR（risk-ai.document.vision-model）
   → Token 切片（800 / 150 重叠）
   → DashScope text-embedding-v4 向量化
   → 写入 Milvus + MySQL 文档元数据
   → Redis 记录 chunk ID（支持一键清空）
 ```
+
+详见 [文档入库指南](docs/文档入库指南.md)。
 
 ## 功能模块
 
@@ -95,22 +123,43 @@ flowchart LR
 
 | 能力 | 说明 |
 | --- | --- |
-| 格式支持 | TXT、PDF（Tika 统一解析） |
+| 格式支持 | **文本**：TXT、MD、CSV、JSON、XML、HTML 等 |
+| | **PDF** |
+| | **Office**：DOC、DOCX、XLS、XLSX、PPT、PPTX、RTF、ODT/ODS/ODP |
+| | **图片**：JPG、PNG、GIF、BMP、WEBP、TIFF（百炼视觉 OCR，默认 `qwen-vl-plus`） |
+| | **其他**：EPUB |
+| 解析方式 | Tika `AutoDetectParser` / 视觉 OCR（`risk-ai.document.*`） |
+| OCR 模型 | 可配置：`qwen-vl-plus`、`qwen-vl-ocr-latest`、`vanchin/deepseek-ocr` 等 |
+| 格式查询 | `GET /doc/supported-types` |
 | 切片策略 | 800 Token / 片，150 Token 重叠（jtokkit） |
 | 向量存储 | Milvus，`text-embedding-v4`（1024 维） |
 | 分类管理 | 文档可绑定知识分类，检索时可按分类过滤 |
 | 清空重建 | `DELETE /doc/clear` 或管理端操作 |
+
+详见 [文档入库指南](docs/文档入库指南.md)。
 
 ### 2. RAG 智能问答
 
 | 能力 | 说明 |
 | --- | --- |
 | 检索 | 向量相似度搜索，默认 topK=5，阈值 0.5 |
+| **多跳检索** | 可选开启：第 1 跳原问题 → LLM/规则生成子查询 → 多跳合并去重（默认关闭） |
 | 防幻觉 | 风控 System Prompt：无依据则回复「暂无相关风控规则信息」 |
 | 引用溯源 | 返回答案关联的知识片段（按 source 去重） |
 | 分类过滤 | 用户可选择知识分类范围提问 |
 
-### 3. Redis 限流 + 缓存 + 降级
+### 3. MCP Server（Model Context Protocol）
+
+| 能力 | 说明 |
+| --- | --- |
+| 传输 | SSE（`/sse` + `/mcp/message`），Spring AI MCP WebMVC |
+| 工具 | `searchRiskKnowledge`、`askRiskQuestion`、`getKnowledgeBaseStats`、`listKnowledgeCategories` |
+| 客户端 | Cursor、Claude Desktop（经 mcp-remote）等 |
+| 鉴权 | MCP 端点不走 `/api/**` Token 拦截，生产环境建议网关限流 |
+
+详见 [MCP 接入指南](docs/MCP接入指南.md)。
+
+### 4. Redis 限流 + 缓存 + 降级
 
 | 能力 | 说明 |
 | --- | --- |
@@ -118,11 +167,11 @@ flowchart LR
 | 缓存 | 问题 MD5 → 答案缓存，默认 TTL 60 分钟 |
 | 降级 | 大模型不可用时返回兜底文案，`degraded=true` |
 
-### 4. 数据持久化与门户
+### 5. 数据持久化与门户
 
 | 表 | 用途 |
 | --- | --- |
-| `qa_log` | 开放 API 问答日志（traceId、耗时、是否缓存/降级） |
+| `ragent_log` | 开放 API 问答日志（traceId、耗时、是否缓存/降级） |
 | `sys_user` | 用户账号（admin / user 角色） |
 | `sys_category` | 知识分类 |
 | `sys_document` | 已上传文档元数据 |
@@ -141,6 +190,7 @@ flowchart LR
 | AI 框架 | Spring AI BOM | **1.0.0** | `pom.xml` → `spring-ai.version` |
 | AI 依赖 | spring-ai-starter-model-openai | **1.0.0** | Maven 解析 |
 | AI 依赖 | spring-ai-starter-vector-store-milvus | **1.0.0** | Maven 解析 |
+| AI 依赖 | spring-ai-starter-mcp-server-webmvc | **1.0.0** | MCP Server |
 | ORM | MyBatis-Plus | **3.5.16** | `pom.xml` |
 | API 文档 | springdoc-openapi | **2.8.5** | `pom.xml` |
 | 文档解析 | Apache Tika | **3.2.3** | `pom.xml` |
@@ -188,7 +238,7 @@ flowchart LR
 
 | 文档 | Spring Boot | Spring AI |
 | --- | --- | --- |
-| 需求文档 [`risk-ai-qa.md`](risk-ai-qa.md) | 3.2.x（拟定） | 1.0.x |
+| 需求文档 [`risk-ai-ragent.md`](risk-ai-ragent.md) | 3.2.x（拟定） | 1.0.x |
 | **本项目实际构建** | **3.4.5** | **1.0.0** |
 
 Spring AI **1.0.0 GA** 要求 Spring Boot **3.4+**；在 Boot 3.2 上可用的 Spring AI 0.8.x 在当前 Maven 镜像环境难以拉取。因此 `pom.xml` 采用 **Boot 3.4.5 + Spring AI 1.0.0**（`mvn dependency:tree` 已验证）。
@@ -198,28 +248,34 @@ Spring AI **1.0.0 GA** 要求 Spring Boot **3.4+**；在 Boot 3.2 上可用的 S
 ## 目录结构
 
 ```
-risk-ai-qa/
-├── src/main/java/com/gm/riskaiqa/
+risk-ai-ragent/
+├── src/main/java/com/gm/riskaiRagent/
 │   ├── annotation/          @RateLimit
 │   ├── aspect/              限流切面
 │   ├── common/              统一响应、异常处理
 │   ├── config/              RagProperties、Redis、MyBatis、鉴权初始化
 │   ├── controller/
 │   │   ├── DocController              /doc/*
-│   │   ├── RiskQaController           /risk/qa
+│   │   ├── RiskRagentController           /risk/ragent
 │   │   └── api/                       门户 API
 │   │       ├── AuthController         /api/auth/*
 │   │       ├── admin/                 管理端
 │   │       └── user/                  用户端
 │   ├── dto/ / entity/ / mapper/
+│   ├── mcp/                 RiskMcpTools（MCP 工具）
 │   ├── security/            AuthContext、Token 拦截
-│   ├── service/             RAG、文档、会话、仪表盘等
-│   └── util/                Tika 解析、Token 切片
+│   ├── service/             RAG、多跳检索、文档、会话、仪表盘等
+│   └── util/                Tika 解析、格式白名单、Token 切片
 ├── src/main/resources/
 │   ├── application.yml      主配置（密钥走环境变量）
 │   └── schema.sql           建表脚本
 ├── docker-compose.yml       MySQL / Redis / Milvus
 └── docs/                    开发与排错文档
+    ├── 快速理解代码.md
+    ├── 文档入库指南.md
+    ├── MCP接入指南.md
+    ├── 多跳检索指南.md
+    └── Windows本地启动与排错.md
 
 risk-ai-web/                 前端门户（同级目录）
 ├── src/views/admin/         仪表盘、用户、分类、文档、问答测试
@@ -267,7 +323,7 @@ $env:MYSQL_PASSWORD="root"
 ```powershell
 $env:JAVA_HOME="F:\tool\jdk-17.0.9"   # 按本机 JDK 17 路径修改
 $env:PATH="$env:JAVA_HOME\bin;$env:PATH"
-cd risk-ai-qa
+cd risk-ai-ragent
 mvn spring-boot:run
 ```
 
@@ -299,9 +355,10 @@ npm run dev
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/doc/ingest` | 文档入库（multipart） |
+| POST | `/doc/ingest` | 文档入库（multipart，支持主流格式） |
+| GET | `/doc/supported-types` | 查询支持的文件扩展名 |
 | DELETE | `/doc/clear` | 清空向量库 |
-| POST | `/risk/qa` | 风控问答（含限流） |
+| POST | `/risk/ragent` | 风控问答（含限流） |
 
 ### 门户接口（需 Token）
 
@@ -314,12 +371,41 @@ npm run dev
 ### 示例：风控问答
 
 ```bash
-curl -X POST http://localhost:8080/risk/qa \
+curl -X POST http://localhost:8080/risk/ragent \
   -H "Content-Type: application/json" \
   -d '{"question":"信用风险的常见缓释手段有哪些？","includeReferences":true}'
 ```
 
-返回字段：`traceId` / `answer` / `references[]` / `fromCache` / `degraded` / `costMs`
+返回字段：`traceId` / `answer` / `references[]` / `fromCache` / `degraded` / `costMs` / `multiHopUsed` / `retrievalHops`
+
+### 示例：文档入库
+
+```bash
+# PDF / Word / Excel 等
+curl -X POST http://localhost:8080/doc/ingest -F "file=@./风控制度.pdf"
+
+# 图片（先 OCR 再切片向量化）
+curl -X POST http://localhost:8080/doc/ingest -F "file=@./制度截图.png"
+
+# 查询支持的格式
+curl http://localhost:8080/doc/supported-types
+```
+
+入库响应含 `fileType`、`parseMode`（`TIKA` / `VISION_OCR`）。详见 [文档入库指南](docs/文档入库指南.md)。
+
+### 示例：MCP 连接（Cursor）
+
+```json
+{
+  "mcpServers": {
+    "risk-ai-ragent": {
+      "url": "http://localhost:8080/sse"
+    }
+  }
+}
+```
+
+详见 [MCP 接入指南](docs/MCP接入指南.md)。
 
 ## 关键配置
 
@@ -328,7 +414,14 @@ curl -X POST http://localhost:8080/risk/qa \
 | 配置 | 默认 | 说明 |
 | --- | --- | --- |
 | `chunk.size` / `chunk.overlap` | 800 / 150 | Token 切片 |
-| `rag.top-k` / `similarity-threshold` | 5 / 0.5 | 检索参数 |
+| `rag.top-k` / `similarity-threshold` | 5 / 0.5 | 单跳检索参数 |
+| `multi-hop.enabled` | **false** | 是否启用多跳检索 |
+| `multi-hop.max-hops` | 2 | 最大跳数（含第 1 跳） |
+| `multi-hop.sub-queries-per-hop` | 2 | 每跳子查询数 |
+| `multi-hop.hop-top-k` / `final-top-k` | 3 / 5 | 每跳 topK / 合并后保留数 |
+| `multi-hop.use-llm-sub-query` | true | 用大模型生成子查询 |
+| `document.vision-model` | qwen-vl-plus | 图片 OCR 模型（可改为 `qwen-vl-ocr-latest`） |
+| `document.ocr-prompt` | … | 图片 OCR 提示词 |
 | `cache.ttl-minutes` | 60 | 答案缓存时长 |
 | `rate-limit.max-requests` / `window-seconds` | 20 / 60 | IP 限流 |
 | `degrade.fallback-answer` | … | 降级兜底文案 |
@@ -340,11 +433,20 @@ curl -X POST http://localhost:8080/risk/qa \
 | `DASHSCOPE_API_KEY` | **必填**，百炼 API Key |
 | `OPENAI_CHAT_MODEL` | 默认 `qwen-plus` |
 | `OPENAI_EMBEDDING_MODEL` | 默认 `text-embedding-v4` |
+| `RISK_AI_VISION_MODEL` | 图片 OCR 模型，默认 `qwen-vl-plus` |
 | `MILVUS_DIM` | 默认 `1024`，须与 Embedding 模型一致 |
+
+MCP 相关（`spring.ai.mcp.server.*`）：
+
+| 配置 | 默认 | 说明 |
+| --- | --- | --- |
+| `enabled` | true | 是否启用 MCP Server |
+| `sse-endpoint` | `/sse` | SSE 连接端点 |
+| `sse-message-endpoint` | `/mcp/message` | 消息端点 |
 
 ## 防幻觉策略
 
-`RagQaService` 内置风控 System Prompt，核心规则：
+`RagRagentService` 内置风控 System Prompt，核心规则：
 
 1. 回答必须 **100% 溯源** 检索到的参考文档；
 2. 文档无对应信息时，统一回复 **「暂无相关风控规则信息」**；
@@ -360,8 +462,10 @@ curl -X POST http://localhost:8080/risk/qa \
 | 权限 | 无 | Redis Token + admin/user 角色 |
 | 分类 | 无 | 知识分类管理与检索过滤 |
 | 缓存限流 | 无 | Redis 缓存 + IP 限流 |
+| 多跳检索 | 无 | 可配置 Multi-hop，跨文档补全上下文 |
+| MCP 对外 | 无 | SSE MCP Server，4 个风控工具 |
 | 降级 | 报错即失败 | 大模型异常自动兜底 |
-| 可观测 | 无 | qa_log traceId + 耗时 + 缓存/降级标记 |
+| 可观测 | 无 | ragent_log traceId + 耗时 + 缓存/降级标记 |
 | 管理后台 | 无 | Vue 3 完整管理端 + 用户端 |
 
 ## 常见问题
@@ -398,6 +502,57 @@ $env:MYSQL_PASSWORD="root"
 <summary><b>引用显示两个相同文档？</b></summary>
 
 同一文档会被切成多个 chunk，检索可能命中多段。后端与前端均已按 `source`（文件名）去重展示。
+</details>
+
+<details>
+<summary><b>如何开启多跳检索？</b></summary>
+
+在 `application.yml` 中设置：
+
+```yaml
+risk-ai:
+  multi-hop:
+    enabled: true
+```
+
+重启后 `/risk/ragent`、用户聊天、管理端问答测试均自动走多跳。默认 `false` 与改造前单跳行为一致。详见 [多跳检索指南](docs/多跳检索指南.md)。
+</details>
+
+<details>
+<summary><b>管理端时间不显示或仪表盘统计为「-」？</b></summary>
+
+前后端字段名不一致：列表用 `createdAt`，前端原绑定 `createTime`；仪表盘用 `users`/`documents`/`categories`，前端原绑定 `userCount` 等。已在 `risk-ai-web` 的 API 层做映射，更新前端后刷新即可。详见 [Windows 本地启动与排错](docs/Windows本地启动与排错.md) §3.12。
+</details>
+
+<details>
+<summary><b>用户端能上传图片吗？如何检索图片内容？</b></summary>
+
+不能。上传仅在**管理端 → 文档管理**；用户端只做**文字问答**。图片先由管理员上传并经 OCR 入库，用户选择对应分类后用文字提问即可检索，**不是以图搜图**。详见 [Windows 本地启动与排错](docs/Windows本地启动与排错.md) §3.14。
+</details>
+
+<details>
+<summary><b>问答提示「服务繁忙」？</b></summary>
+
+表示大模型调用失败（`degraded=true`），多为 API Key 无效或百炼超时，与「不支持图片检索」无关。修复 Key 并重启后端。详见 [Windows 本地启动与排错](docs/Windows本地启动与排错.md) §3.15。
+</details>
+
+<details>
+<summary><b>图片上传后解析失败？</b></summary>
+
+图片入库走百炼视觉 OCR（`risk-ai.document.vision-model`，默认 `qwen-vl-plus`），需确保 `DASHSCOPE_API_KEY` 有效且已开通对应模型。
+
+- 若报 `invalid header value: "Bearer 你的key"`，说明 Key 仍是占位符，见 [排错指南](docs/Windows本地启动与排错.md) §3.13
+- 扫描件、表格多：建议改为 `qwen-vl-ocr-latest`（`RISK_AI_VISION_MODEL` 环境变量）
+- 复杂版式可试 `vanchin/deepseek-ocr`，**不必自建 DeepSeek-OCR**
+- 图片检索是 OCR 成文字后再向量检索，不是以图搜图
+
+详见 [文档入库指南](docs/文档入库指南.md)。
+</details>
+
+<details>
+<summary><b>支持哪些文件格式？</b></summary>
+
+TXT/MD/CSV、PDF、Word(DOC/DOCX)、Excel、PPT、图片(JPG/PNG 等)、EPUB。调用 `GET /doc/supported-types` 或查看 [文档入库指南](docs/文档入库指南.md)。
 </details>
 
 <details>

@@ -4,5 +4,5 @@ mybatis-plus:
 
 logging:
   level:
-    com.gm.riskaiqa: DEBUG
+    com.gm.riskaiRagent: DEBUG
     org.springframework.ai: DEBUG

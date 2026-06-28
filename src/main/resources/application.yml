@@ -5,9 +5,9 @@ server:
 
 spring:
   application:
-    name: risk-ai-qa
+    name: risk-ai-ragent
   profiles:
-    active: dev
+    active: dev,local
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: Asia/Shanghai
@@ -18,7 +18,7 @@ spring:
 
   # ---- MySQL ----
   datasource:
-    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DB:risk_ai_qa}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DB:risk_ai_ragent}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
     username: ${MYSQL_USER:root}
     password: ${MYSQL_PASSWORD:123456}
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -73,6 +73,24 @@ spring:
         index-type: IVF_FLAT
         metric-type: COSINE
         initialize-schema: true
+    mcp:
+      server:
+        enabled: true
+        name: risk-ai-ragent-mcp
+        version: 1.0.0
+        type: SYNC
+        instructions: |
+          本 MCP Server 提供金融风控知识库 RAG 能力。
+          工具：searchRiskKnowledge（向量检索）、askRiskQuestion（RAG 问答）、
+          getKnowledgeBaseStats（统计）、listKnowledgeCategories（分类列表）。
+          问答严格遵守内部文档，禁止编造。
+        sse-endpoint: /sse
+        sse-message-endpoint: /mcp/message
+        capabilities:
+          tool: true
+          resource: false
+          prompt: false
+          completion: false
 
 # ---- MyBatis-Plus ----
 mybatis-plus:
@@ -85,7 +103,7 @@ mybatis-plus:
       logic-delete-field: deleted
       logic-delete-value: 1
       logic-not-delete-value: 0
-  type-aliases-package: com.gm.riskaiqa.entity
+  type-aliases-package: com.gm.riskaiRagent.entity
   mapper-locations: classpath*:/mapper/**/*.xml
 
 # ---- Application specific settings (all tunables externalized here) ----
@@ -102,19 +120,32 @@ risk-ai:
   rag:
     top-k: 5
     similarity-threshold: 0.5
+  # 多跳检索（默认关闭，开启后问答链路自动多跳召回；MCP 单跳工具不受影响）
+  multi-hop:
+    enabled: false
+    max-hops: 2
+    sub-queries-per-hop: 2
+    hop-top-k: 3
+    final-top-k: 5
+    use-llm-sub-query: true
+  # 文档入库：办公文档走 Tika，图片走百炼视觉 OCR
+  document:
+    vision-model: ${RISK_AI_VISION_MODEL:qwen-vl-plus}
+    ocr-prompt: |
+      你是金融风控文档 OCR 助手。请完整提取图片中的全部可见文字（含表格、标题、页眉页脚），保持原有层次与条目结构；若有印章、签名、图表说明也请文字化描述。只输出识别内容，不要添加解释或总结。若图片中无可读文字，仅回复「无文字内容」。
   # Redis answer cache
   cache:
     enabled: true
     ttl-minutes: 60
-    key-prefix: "risk-ai:qa:cache:"
-  # Redis fixed-window rate limiting for /risk/qa
+    key-prefix: "risk-ai:ragent:cache:"
+  # Redis fixed-window rate limiting for /risk/ragent
   rate-limit:
     enabled: true
     # Max requests allowed per window, per client IP
     max-requests: 20
     # Window length in seconds
     window-seconds: 60
-    key-prefix: "risk-ai:qa:rl:"
+    key-prefix: "risk-ai:ragent:rl:"
   # Service degradation
   degrade:
     # Fallback answer returned when the LLM is unavailable / times out
@@ -128,5 +159,5 @@ springdoc:
 
 logging:
   level:
-    com.gm.riskaiqa: INFO
+    com.gm.riskaiRagent: INFO
     org.springframework.ai: INFO

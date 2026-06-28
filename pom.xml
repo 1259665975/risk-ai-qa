@@ -13,10 +13,10 @@
     </parent>
 
     <groupId>com.gm</groupId>
-    <artifactId>risk-ai-qa</artifactId>
+    <artifactId>risk-ai-ragent</artifactId>
     <version>1.0.0</version>
-    <name>risk-ai-qa</name>
-    <description>Risk domain intelligent Q&amp;A system based on RAG (Spring AI + Milvus)</description>
+    <name>risk-ai-ragent</name>
+    <description>Risk domain intelligent RAgent based on RAG (Spring AI + Milvus)</description>
 
     <properties>
         <java.version>17</java.version>
@@ -77,6 +77,11 @@
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-starter-vector-store-milvus</artifactId>
+        </dependency>
+        <!-- Spring AI: MCP Server (SSE over WebMVC, expose RAG tools to MCP clients) -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-mcp-server-webmvc</artifactId>
         </dependency>
 
         <!-- Apache Tika: parse TXT / PDF / etc. -->
@@ -139,7 +144,7 @@
     </dependencyManagement>
 
     <build>
-        <finalName>risk-ai-qa</finalName>
+        <finalName>risk-ai-ragent</finalName>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
