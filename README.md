@@ -238,8 +238,7 @@ flowchart TB
 
 | 文档 | Spring Boot | Spring AI |
 | --- | --- | --- |
-| 需求文档 [`risk-ai-ragent.md`](risk-ai-ragent.md) | 3.2.x（拟定） | 1.0.x |
-| **本项目实际构建** | **3.4.5** | **1.0.0** |
+| **本项目实际构建** | **3.4.5**   | **1.0.0** |
 
 Spring AI **1.0.0 GA** 要求 Spring Boot **3.4+**；在 Boot 3.2 上可用的 Spring AI 0.8.x 在当前 Maven 镜像环境难以拉取。因此 `pom.xml` 采用 **Boot 3.4.5 + Spring AI 1.0.0**（`mvn dependency:tree` 已验证）。
 
