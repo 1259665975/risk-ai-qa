@@ -37,6 +37,7 @@ public class DocumentService {
     private final DocumentParser documentParser;
     private final TokenTextChunker tokenTextChunker;
     private final VectorStoreService vectorStoreService;
+    private final ChunkIndexService chunkIndexService;
     private final StringRedisTemplate stringRedisTemplate;
 
     public IngestResponse ingest(MultipartFile file) throws IOException {
@@ -79,6 +80,11 @@ public class DocumentService {
 
         vectorStoreService.add(documents);
 
+        for (int i = 0; i < documents.size(); i++) {
+            Document doc = documents.get(i);
+            chunkIndexService.index(doc.getId(), doc.getText(), categoryId, fileName);
+        }
+
         if (!chunkIds.isEmpty()) {
             stringRedisTemplate.opsForSet().add(CHUNK_ID_SET, chunkIds.toArray(new String[0]));
             stringRedisTemplate.opsForSet().add(docChunkKey(docId), chunkIds.toArray(new String[0]));
@@ -105,6 +111,7 @@ public class DocumentService {
         Set<String> ids = stringRedisTemplate.opsForSet().members(docChunkKey(docId));
         if (ids != null && !ids.isEmpty()) {
             vectorStoreService.delete(new ArrayList<>(ids));
+            chunkIndexService.remove(ids);
             stringRedisTemplate.opsForSet().remove(CHUNK_ID_SET, ids.toArray());
             stringRedisTemplate.delete(docChunkKey(docId));
             log.info("Deleted docId={} chunks={}", docId, ids.size());
@@ -142,6 +149,7 @@ public class DocumentService {
             }
         }
         stringRedisTemplate.delete(CHUNK_ID_SET);
+        chunkIndexService.clear();
 
         log.info("Cleared knowledge base, removed {} chunks, {} per-doc redis keys",
                 allChunkIds.size(), docKeyCount);

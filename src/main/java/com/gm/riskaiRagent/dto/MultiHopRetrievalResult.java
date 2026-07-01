@@ -27,4 +27,10 @@ public class MultiHopRetrievalResult {
     /** 各跳生成的子查询（便于日志排查）。 */
     @Builder.Default
     private List<String> subQueries = Collections.emptyList();
+
+    /** 是否使用了混合检索（向量 + 关键词 RRF）。 */
+    private boolean hybridUsed;
+
+    /** 是否使用了 Rerank 精排。 */
+    private boolean rerankUsed;
 }

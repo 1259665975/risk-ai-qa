@@ -33,6 +33,8 @@ class DocumentServiceClearAllTest {
     @Mock
     private VectorStoreService vectorStoreService;
     @Mock
+    private ChunkIndexService chunkIndexService;
+    @Mock
     private StringRedisTemplate stringRedisTemplate;
     @Mock
     private SetOperations<String, String> setOperations;
@@ -58,6 +60,7 @@ class DocumentServiceClearAllTest {
         verify(vectorStoreService).delete(anyList());
         verify(stringRedisTemplate).delete(Set.of(docKeyA, docKeyB));
         verify(stringRedisTemplate).delete(CHUNK_ID_SET);
+        verify(chunkIndexService).clear();
     }
 
     @Test
@@ -76,6 +79,7 @@ class DocumentServiceClearAllTest {
         verify(vectorStoreService).delete(anyList());
         verify(stringRedisTemplate).delete(Set.of(orphanKey));
         verify(stringRedisTemplate).delete(CHUNK_ID_SET);
+        verify(chunkIndexService).clear();
     }
 
     @Test
@@ -91,5 +95,6 @@ class DocumentServiceClearAllTest {
 
         assertEquals(1, removed);
         verify(stringRedisTemplate).delete(CHUNK_ID_SET);
+        verify(chunkIndexService).clear();
     }
 }

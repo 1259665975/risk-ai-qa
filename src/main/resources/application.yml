@@ -120,6 +120,18 @@ risk-ai:
   rag:
     top-k: 5
     similarity-threshold: 0.5
+  # 混合检索（向量 + BM25/RRF）与 Rerank 精排
+  retrieval:
+    hybrid:
+      enabled: true
+      candidate-top-k: 20
+      rrf-k: 60
+    rerank:
+      enabled: true
+      model: ${RISK_AI_RERANK_MODEL:qwen3-rerank}
+      base-url: https://dashscope.aliyuncs.com/compatible-api/v1/reranks
+      instruct: "Given a web search query, retrieve relevant passages that answer the query."
+      fail-open: true
   # 多跳检索（默认关闭，开启后问答链路自动多跳召回；MCP 单跳工具不受影响）
   multi-hop:
     enabled: false

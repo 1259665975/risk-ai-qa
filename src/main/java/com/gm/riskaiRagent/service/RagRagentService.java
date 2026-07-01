@@ -141,6 +141,8 @@ public class RagRagentService {
                 .costMs(cost)
                 .multiHopUsed(retrievalResult.isMultiHopUsed())
                 .retrievalHops(retrievalResult.getHops())
+                .hybridRetrievalUsed(retrievalResult.isHybridUsed())
+                .rerankUsed(retrievalResult.isRerankUsed())
                 .build();
 
         // 4) Cache successful answers only.
@@ -154,6 +156,8 @@ public class RagRagentService {
                     .costMs(cost)
                     .multiHopUsed(retrievalResult.isMultiHopUsed())
                     .retrievalHops(retrievalResult.getHops())
+                    .hybridRetrievalUsed(retrievalResult.isHybridUsed())
+                    .rerankUsed(retrievalResult.isRerankUsed())
                     .build());
         }
 
@@ -220,6 +224,13 @@ public class RagRagentService {
         }
         if (ragProperties.getMultiHop().isEnabled()) {
             raw = raw + "|mh";
+        }
+        RagProperties.Retrieval retrieval = ragProperties.getRetrieval();
+        if (retrieval.getHybrid().isEnabled()) {
+            raw = raw + "|hybrid";
+        }
+        if (retrieval.getRerank().isEnabled()) {
+            raw = raw + "|rerank";
         }
         String hash = DigestUtils.md5DigestAsHex(raw.getBytes(StandardCharsets.UTF_8));
         return ragProperties.getCache().getKeyPrefix() + hash;

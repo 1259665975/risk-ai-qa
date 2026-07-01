@@ -1,6 +1,7 @@
 package com.gm.riskaiRagent.service;
 
 import com.gm.riskaiRagent.config.RagProperties;
+import com.gm.riskaiRagent.dto.EnhancedRetrievalResult;
 import com.gm.riskaiRagent.dto.MultiHopRetrievalResult;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -14,7 +15,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,13 +38,16 @@ public class MultiHopRetrievalService {
             """;
 
     private final VectorStoreService vectorStoreService;
+    private final EnhancedRetrievalService enhancedRetrievalService;
     private final RagProperties ragProperties;
     private final ChatModel chatModel;
 
     public MultiHopRetrievalService(VectorStoreService vectorStoreService,
+                                    EnhancedRetrievalService enhancedRetrievalService,
                                     RagProperties ragProperties,
                                     @Lazy ChatModel chatModel) {
         this.vectorStoreService = vectorStoreService;
+        this.enhancedRetrievalService = enhancedRetrievalService;
         this.ragProperties = ragProperties;
         this.chatModel = chatModel;
     }
@@ -55,11 +58,14 @@ public class MultiHopRetrievalService {
     public MultiHopRetrievalResult retrieve(String question, List<Long> categoryIds) {
         RagProperties.MultiHop cfg = ragProperties.getMultiHop();
         if (!cfg.isEnabled()) {
-            List<Document> docs = vectorStoreService.similaritySearch(question, categoryIds);
+            EnhancedRetrievalResult enhanced = enhancedRetrievalService.retrieve(
+                    question, categoryIds, ragProperties.getRag().getTopK());
             return MultiHopRetrievalResult.builder()
-                    .documents(docs)
+                    .documents(enhanced.getDocuments())
                     .hops(1)
                     .multiHopUsed(false)
+                    .hybridUsed(enhanced.isHybridUsed())
+                    .rerankUsed(enhanced.isRerankUsed())
                     .build();
         }
         return multiHopRetrieve(question, categoryIds, cfg);
@@ -85,6 +91,8 @@ public class MultiHopRetrievalService {
                     .hops(1)
                     .multiHopUsed(true)
                     .subQueries(allSubQueries)
+                    .hybridUsed(false)
+                    .rerankUsed(false)
                     .build();
         }
 
@@ -111,16 +119,17 @@ public class MultiHopRetrievalService {
             }
         }
 
-        List<Document> finalDocs = merged.values().stream()
-                .sorted(Comparator.comparing(Document::getScore, Comparator.nullsLast(Comparator.reverseOrder())))
-                .limit(finalTopK)
-                .collect(Collectors.toList());
+        List<Document> mergedDocs = new ArrayList<>(merged.values());
+        EnhancedRetrievalResult enhanced = enhancedRetrievalService.refine(
+                question, mergedDocs, categoryIds, finalTopK);
 
         return MultiHopRetrievalResult.builder()
-                .documents(finalDocs)
+                .documents(enhanced.getDocuments())
                 .hops(hopsExecuted)
                 .multiHopUsed(true)
                 .subQueries(allSubQueries)
+                .hybridUsed(enhanced.isHybridUsed())
+                .rerankUsed(enhanced.isRerankUsed())
                 .build();
     }
 

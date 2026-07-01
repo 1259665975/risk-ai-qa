@@ -35,4 +35,8 @@ public class RagentResponse implements Serializable {
     private boolean multiHopUsed;
     /** 实际检索跳数（单跳为 1）。 */
     private int retrievalHops;
+    /** 是否使用了混合检索（向量 + 关键词 RRF）。 */
+    private boolean hybridRetrievalUsed;
+    /** 是否使用了 Rerank 精排。 */
+    private boolean rerankUsed;
 }

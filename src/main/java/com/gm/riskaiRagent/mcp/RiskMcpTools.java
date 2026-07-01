@@ -5,9 +5,9 @@ import com.gm.riskaiRagent.dto.RagentRequest;
 import com.gm.riskaiRagent.dto.RagentResponse;
 import com.gm.riskaiRagent.entity.SysCategory;
 import com.gm.riskaiRagent.service.DashboardService;
+import com.gm.riskaiRagent.service.EnhancedRetrievalService;
 import com.gm.riskaiRagent.service.RagRagentService;
 import com.gm.riskaiRagent.service.SysCategoryService;
-import com.gm.riskaiRagent.service.VectorStoreService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.tool.annotation.Tool;
@@ -26,16 +26,16 @@ import java.util.stream.Collectors;
 @Service
 public class RiskMcpTools {
 
-    private final VectorStoreService vectorStoreService;
+    private final EnhancedRetrievalService enhancedRetrievalService;
     private final RagRagentService ragRagentService;
     private final DashboardService dashboardService;
     private final SysCategoryService sysCategoryService;
 
-    public RiskMcpTools(VectorStoreService vectorStoreService,
+    public RiskMcpTools(EnhancedRetrievalService enhancedRetrievalService,
                         @Lazy RagRagentService ragRagentService,
                         DashboardService dashboardService,
                         SysCategoryService sysCategoryService) {
-        this.vectorStoreService = vectorStoreService;
+        this.enhancedRetrievalService = enhancedRetrievalService;
         this.ragRagentService = ragRagentService;
         this.dashboardService = dashboardService;
         this.sysCategoryService = sysCategoryService;
@@ -49,7 +49,7 @@ public class RiskMcpTools {
     public String searchRiskKnowledge(
             @ToolParam(description = "检索关键词或自然语言问题，例如：员工年假规定、反欺诈规则") String query) {
         log.info("MCP tool searchRiskKnowledge: query={}", query);
-        List<Document> docs = vectorStoreService.similaritySearch(query);
+        List<Document> docs = enhancedRetrievalService.retrieve(query, null, 5).getDocuments();
         if (docs == null || docs.isEmpty()) {
             return "未检索到相关风控文档片段。";
         }

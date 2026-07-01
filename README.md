@@ -19,7 +19,7 @@
 **Risk AI RAGENT** 是一套面向金融风控场景的企业级 RAG 智能问答系统，覆盖从文档入库到门户问答的完整链路。后端 **Spring Boot 3.4.5 + Spring AI 1.0.0**，前端配套 **Vue 3 管理门户**（仓库 [`risk-ai-web`](../risk-ai-web)）。
 
 - **知识库入库**：Apache Tika 解析主流办公文档 + 百炼视觉 OCR 识别图片 → jtokkit **800 Token 切片 / 150 Token 重叠** → 百炼 Embedding → Milvus 向量存储。
-- **RAG 智能问答**：向量相似度检索（可选**多跳检索**）→ **风控 Prompt 强约束**（仅依据参考文档作答，禁止幻觉）→ 千问大模型生成答案。
+- **RAG 智能问答**：混合检索（向量 + BM25/RRF）+ **Rerank 精排** + 可选**多跳检索** → 风控 Prompt 强约束 → 千问大模型生成答案。
 - **生产级能力**：Redis **答案缓存**、IP **限流**、大模型异常 **服务降级**、问答全链路 **MySQL 日志**。
 - **MCP 对外暴露**：Spring AI MCP Server，供 Cursor / Claude 等客户端调用风控 RAG 工具。
 - **企业门户**：管理员后台（用户/分类/文档/仪表盘/问答测试）+ 普通用户端（智能问答/会话历史/个人中心），Token 鉴权 + 角色隔离。
@@ -31,9 +31,11 @@
 | | 链接 | 说明 |
 | :---: | :--- | :--- |
 | 📖 | [快速理解代码](docs/快速理解代码.md) | 后端模块与调用链导读 |
+| 🏗️ | [RAG 架构说明](docs/RAG架构说明.md) | 三大 RAG 架构定位与本项目分层 |
 | 📄 | [文档入库指南](docs/文档入库指南.md) | 多格式上传、Tika、图片 OCR、模型选型 |
 | 🔌 | [MCP 接入指南](docs/MCP接入指南.md) | Cursor / Claude 调用风控 RAG 工具 |
 | 🔁 | [多跳检索指南](docs/多跳检索指南.md) | Multi-hop 检索原理与配置 |
+| 🔀 | [混合检索与 Rerank 指南](docs/混合检索与Rerank指南.md) | 混合召回、RRF 融合、精排配置与排错 |
 | 🛠️ | [Windows 本地启动与排错](docs/Windows本地启动与排错.md) | Docker / WSL / 端口 / Embedding 404 等 |
 | 🔧 | [application.yml](src/main/resources/application.yml) | 全部可调参数与环境变量 |
 | 📋 | [.env.example](.env.example) | 本地密钥与中间件配置模板 |
@@ -51,7 +53,7 @@ flowchart TB
         P2["文档 API<br/>/doc/ingest · /doc/supported-types"]
         P3["RAgent API<br/>/risk/ragent"]
         P4["MCP Server<br/>/sse · /mcp/message"]
-        CORE["核心引擎<br/>RagRagentService · MultiHopRetrieval · DocumentService"]
+        CORE["核心引擎<br/>RagRagentService · EnhancedRetrieval · MultiHopRetrieval · DocumentService"]
         P1 --> CORE
         P2 --> CORE
         P3 --> CORE
@@ -84,7 +86,9 @@ flowchart TB
 | | RAgent API | RAG 检索 + 风控 Prompt + 缓存/限流/降级 |
 | | MCP Server | 对外暴露检索、问答、统计等工具 |
 | 数据层 | MySQL / Redis / Milvus | 业务元数据、缓存与限流、向量相似度检索 |
-| 模型层 | 百炼 DashScope | 对话生成、Embedding、图片 OCR |
+| 模型层 | 百炼 DashScope | 对话生成、Embedding、图片 OCR、**Rerank 精排** |
+
+> **RAG 架构定位**：本项目属于 **Advanced RAG**（混合检索 + Rerank + 可选多跳），详见 [RAG 架构说明](docs/RAG架构说明.md)。
 
 ### 一次问答的核心链路
 
@@ -92,13 +96,14 @@ flowchart TB
 用户提问
   → 鉴权（Redis Token）
   → 答案缓存查询（Redis，MD5 Key）
-  → 向量检索（单跳 / 多跳，见 risk-ai.multi-hop.enabled）
-      · 单跳：Milvus topK + 相似度阈值 + 可选分类过滤
-      · 多跳：第 1 跳原问题 → 生成子查询 → 第 2 跳再检索 → 合并去重
+  → 检索编排（见 risk-ai.multi-hop / risk-ai.retrieval 配置）
+      · 向量召回（Milvus，candidate-top-k）+ 关键词召回（Redis BM25，默认开启）
+      · RRF 融合 → qwen3-rerank 精排 → final top-k
+      · 可选多跳：原问题 → 子查询 → 合并后再混合 + Rerank
   → 组装风控 System Prompt + 检索上下文
   → 百炼千问生成回答
   → 引用按文档名去重
-  → 写入 chat_message / ragent_log，返回答案与引用（含 multiHopUsed / retrievalHops）
+  → 写入 chat_message / ragent_log，返回答案与引用（含 multiHopUsed / hybridRetrievalUsed / rerankUsed）
 ```
 
 ### 文档入库链路
@@ -111,7 +116,7 @@ flowchart TB
       · 图片 → 百炼视觉 OCR（risk-ai.document.vision-model）
   → Token 切片（800 / 150 重叠）
   → DashScope text-embedding-v4 向量化
-  → 写入 Milvus + MySQL 文档元数据
+  → 写入 Milvus + Redis 关键词索引 + MySQL 文档元数据
   → Redis 记录 chunk ID（支持一键清空）
 ```
 
@@ -142,11 +147,14 @@ flowchart TB
 
 | 能力 | 说明 |
 | --- | --- |
-| 检索 | 向量相似度搜索，默认 topK=5，阈值 0.5 |
-| **多跳检索** | 可选开启：第 1 跳原问题 → LLM/规则生成子查询 → 多跳合并去重（默认关闭） |
+| 检索 | **混合检索**：Milvus 向量 + Redis BM25 关键词，RRF 融合（默认开启） |
+| **Rerank 精排** | 百炼 `qwen3-rerank` 对候选文档二次排序（默认开启） |
+| **多跳检索** | 可选开启：第 1 跳原问题 → LLM/规则生成子查询 → 多跳合并后再混合 + Rerank（默认关闭） |
 | 防幻觉 | 风控 System Prompt：无依据则回复「暂无相关风控规则信息」 |
 | 引用溯源 | 返回答案关联的知识片段（按 source 去重） |
 | 分类过滤 | 用户可选择知识分类范围提问 |
+
+详见 [混合检索与 Rerank 指南](docs/混合检索与Rerank指南.md)、[RAG 架构说明](docs/RAG架构说明.md)。
 
 ### 3. MCP Server（Model Context Protocol）
 
@@ -274,6 +282,8 @@ risk-ai-ragent/
     ├── 文档入库指南.md
     ├── MCP接入指南.md
     ├── 多跳检索指南.md
+    ├── 混合检索与Rerank指南.md
+    ├── RAG架构说明.md
     └── Windows本地启动与排错.md
 
 risk-ai-web/                 前端门户（同级目录）
@@ -375,7 +385,7 @@ curl -X POST http://localhost:8080/risk/ragent \
   -d '{"question":"信用风险的常见缓释手段有哪些？","includeReferences":true}'
 ```
 
-返回字段：`traceId` / `answer` / `references[]` / `fromCache` / `degraded` / `costMs` / `multiHopUsed` / `retrievalHops`
+返回字段：`traceId` / `answer` / `references[]` / `fromCache` / `degraded` / `costMs` / `multiHopUsed` / `retrievalHops` / `hybridRetrievalUsed` / `rerankUsed`
 
 ### 示例：文档入库
 
@@ -413,7 +423,13 @@ curl http://localhost:8080/doc/supported-types
 | 配置 | 默认 | 说明 |
 | --- | --- | --- |
 | `chunk.size` / `chunk.overlap` | 800 / 150 | Token 切片 |
-| `rag.top-k` / `similarity-threshold` | 5 / 0.5 | 单跳检索参数 |
+| `rag.top-k` / `similarity-threshold` | 5 / 0.5 | 最终送入 LLM 的条数 / 向量相似度阈值 |
+| `retrieval.hybrid.enabled` | **true** | 是否启用混合检索（向量 + BM25） |
+| `retrieval.hybrid.candidate-top-k` | 20 | 向量/关键词各自召回候选数 |
+| `retrieval.hybrid.rrf-k` | 60 | RRF 融合平滑常数 |
+| `retrieval.rerank.enabled` | **true** | 是否启用 qwen3-rerank 精排 |
+| `retrieval.rerank.model` | qwen3-rerank | Rerank 模型名 |
+| `retrieval.rerank.fail-open` | true | Rerank 失败时回退到融合排序 |
 | `multi-hop.enabled` | **false** | 是否启用多跳检索 |
 | `multi-hop.max-hops` | 2 | 最大跳数（含第 1 跳） |
 | `multi-hop.sub-queries-per-hop` | 2 | 每跳子查询数 |
@@ -433,6 +449,7 @@ curl http://localhost:8080/doc/supported-types
 | `OPENAI_CHAT_MODEL` | 默认 `qwen-plus` |
 | `OPENAI_EMBEDDING_MODEL` | 默认 `text-embedding-v4` |
 | `RISK_AI_VISION_MODEL` | 图片 OCR 模型，默认 `qwen-vl-plus` |
+| `RISK_AI_RERANK_MODEL` | Rerank 模型，默认 `qwen3-rerank` |
 | `MILVUS_DIM` | 默认 `1024`，须与 Embedding 模型一致 |
 
 MCP 相关（`spring.ai.mcp.server.*`）：
@@ -462,6 +479,7 @@ MCP 相关（`spring.ai.mcp.server.*`）：
 | 分类 | 无 | 知识分类管理与检索过滤 |
 | 缓存限流 | 无 | Redis 缓存 + IP 限流 |
 | 多跳检索 | 无 | 可配置 Multi-hop，跨文档补全上下文 |
+| 混合检索 + Rerank | 无 | 向量 + BM25 混合召回，qwen3-rerank 精排 |
 | MCP 对外 | 无 | SSE MCP Server，4 个风控工具 |
 | 降级 | 报错即失败 | 大模型异常自动兜底 |
 | 可观测 | 无 | ragent_log traceId + 耗时 + 缓存/降级标记 |
@@ -501,6 +519,14 @@ $env:MYSQL_PASSWORD="root"
 <summary><b>引用显示两个相同文档？</b></summary>
 
 同一文档会被切成多个 chunk，检索可能命中多段。后端与前端均已按 `source`（文件名）去重展示。
+</details>
+
+<details>
+<summary><b>混合检索 / Rerank 不生效？历史文档搜不到？</b></summary>
+
+关键词索引在**入库时**写入 Redis（`risk-ai:chunk:index`）。功能上线前已入库的文档需**重新上传**，或先 `DELETE /doc/clear` 再批量入库。
+
+配置见 `risk-ai.retrieval.*`；Rerank 依赖 `DASHSCOPE_API_KEY`。详见 [混合检索与 Rerank 指南](docs/混合检索与Rerank指南.md)。
 </details>
 
 <details>

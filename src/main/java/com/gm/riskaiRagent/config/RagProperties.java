@@ -14,6 +14,7 @@ public class RagProperties {
 
     private Chunk chunk = new Chunk();
     private Rag rag = new Rag();
+    private Retrieval retrieval = new Retrieval();
     private MultiHop multiHop = new MultiHop();
     private Document document = new Document();
     private Cache cache = new Cache();
@@ -38,6 +39,39 @@ public class RagProperties {
         private int topK = 5;
         /** 相似度阈值，低于此值的文档被过滤。 */
         private double similarityThreshold = 0.5;
+    }
+
+    /** 混合检索与 Rerank 精排配置。 */
+    @Data
+    public static class Retrieval {
+        private Hybrid hybrid = new Hybrid();
+        private Rerank rerank = new Rerank();
+    }
+
+    /** 向量 + BM25 混合召回（RRF 融合）。 */
+    @Data
+    public static class Hybrid {
+        /** 是否启用混合检索。 */
+        private boolean enabled = true;
+        /** 向量/关键词各自召回候选数，融合后再精排。 */
+        private int candidateTopK = 20;
+        /** RRF 平滑常数 k。 */
+        private int rrfK = 60;
+    }
+
+    /** 百炼 qwen3-rerank 精排。 */
+    @Data
+    public static class Rerank {
+        /** 是否启用 Rerank。 */
+        private boolean enabled = true;
+        /** Rerank 模型名。 */
+        private String model = "qwen3-rerank";
+        /** Rerank API 地址（OpenAI 兼容 reranks 端点）。 */
+        private String baseUrl = "https://dashscope.aliyuncs.com/compatible-api/v1/reranks";
+        /** 排序任务提示，面向问答检索场景。 */
+        private String instruct = "Given a web search query, retrieve relevant passages that answer the query.";
+        /** API 失败时是否回退到融合排序结果。 */
+        private boolean failOpen = true;
     }
 
     /**
